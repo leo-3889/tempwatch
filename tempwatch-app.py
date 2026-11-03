@@ -205,6 +205,7 @@ class TempWatch(Gtk.Application):
         self.pinned: str | None = None
         with contextlib.suppress(Exception), \
                 open(os.path.expanduser("~/.config/tempwatch-pin.json")) as f:
+            # pi-lens-ignore: unchecked-throwing-call-python
             self.pinned = json.load(f).get("row")
         self.vitals = self._open_vitals()
 
@@ -321,7 +322,7 @@ class TempWatch(Gtk.Application):
         self.ind.set_status(AI.IndicatorStatus.ACTIVE)
         menu = Gtk.Menu()
         show = Gtk.MenuItem(label="Show TempWatch")
-        show.connect("activate", lambda *_: self.win.present() if self.win else self.activate())
+        show.connect("activate", self._show_window)
         menu.append(show)
         reset_i = Gtk.MenuItem(label="Show hottest sensor")
         reset_i.connect("activate", self._unpin)
@@ -333,9 +334,26 @@ class TempWatch(Gtk.Application):
         menu.show_all()
         self.ind.set_menu(menu)
 
+    def _show_window(self, *_a: Any) -> None:
+        if self.win is None:
+            self.activate()
+            return
+        self.win.deiconify()
+        self.win.show()
+        self.win.present()
+
+    def do_startup(self) -> None:
+        """Solaar-style: the tray icon exists from startup; the window is
+        shown on activation."""
+        Gtk.Application.do_startup(self)
+        with contextlib.suppress(Exception):  # tray-less DEs: window only
+            self._make_indicator()
+
     def _save_pin(self) -> None:
         with contextlib.suppress(Exception):
+            # pi-lens-ignore: unchecked-throwing-call-python
             os.makedirs(os.path.expanduser("~/.config"), exist_ok=True)
+            # pi-lens-ignore: unchecked-throwing-call-python
             with open(os.path.expanduser("~/.config/tempwatch-pin.json"),
                       "w") as f:
                 json.dump({"row": self.pinned}, f)
@@ -383,10 +401,10 @@ class TempWatch(Gtk.Application):
         # The tray (top-bar) icon's "Show TempWatch" is how you get back.
         win.set_skip_taskbar_hint(True)
         win.set_skip_pager_hint(True)
-        # Dropbox-style: minimize hides to the tray icon, close quits,
-        # tray menu "Show TempWatch" brings it back.
+        # Solaar-style: minimize hides to tray; close (X) hides to the
+        # tray too — quitting is via the tray menu (or SIGTERM).
         win.connect("window-state-event", self._on_state)
-        win.connect("delete-event", lambda *_a: (self.quit(), False)[1])
+        win.connect("delete-event", lambda *_a: (win.hide(), True)[1])
 
     def _on_state(self, win: Any, ev: Any) -> bool:
         if ev.new_window_state & Gdk.WindowState.ICONIFIED:
