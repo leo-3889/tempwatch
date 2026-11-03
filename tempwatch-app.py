@@ -279,6 +279,10 @@ class TempWatch(Gtk.Application):
         else:
             hot = [k for k in hot if k != key]
         vs.set_strv("hot-sensors", hot)
+        # show pins next to the system tray (Vitals default is center,
+        # where maximized windows hide them)
+        if vs.get_int("position-in-panel") != 2:
+            vs.set_int("position-in-panel", 2)
         # v86 has no changed::hot-sensors handler — nudge a watched key so
         # the extension repaints the panel (_showHideSensorsChanged redraws)
         v = vs.get_boolean("show-temperature")
