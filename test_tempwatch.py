@@ -99,9 +99,31 @@ def test_single_slot():
     print("test_single_slot ok")
 
 
+def test_activate_builds_ui():
+    """Structural guard: a method def inside do_activate silently truncates
+    it (real bug once: UI-building code became dead code)."""
+    import ast as _ast
+    with open(os.path.join(os.path.dirname(__file__), "tempwatch-app.py")) as f:
+        src = f.read()
+    tree = _ast.parse(src)
+    cls = next(n for n in tree.body
+               if isinstance(n, _ast.ClassDef) and n.name == "TempWatch")
+    act = next(n for n in cls.body
+               if isinstance(n, _ast.FunctionDef) and n.name == "do_activate")
+    inner = [n for n in _ast.walk(act)
+             if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+             and n is not act]
+    assert not inner, f"nested defs inside do_activate: {[f.name for f in inner]}"
+    # and do_activate must end with showing the window
+    last = act.body[-1]
+    assert "show_all" in _ast.unparse(last), _ast.unparse(last)
+    print("test_activate_builds_ui ok")
+
+
 if __name__ == "__main__":
     test_color_for()
     test_discover()
     test_vitals_keys()
     test_single_slot()
+    test_activate_builds_ui()
     print("ALL TESTS PASSED")

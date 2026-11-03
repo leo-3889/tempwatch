@@ -406,11 +406,6 @@ class TempWatch(Gtk.Application):
         win.connect("window-state-event", self._on_state)
         win.connect("delete-event", lambda *_a: (self.quit(), False)[1])
 
-    def _on_state(self, win: Any, ev: Any) -> bool:
-        if ev.new_window_state & Gdk.WindowState.ICONIFIED:
-            win.hide()
-        return False
-
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         win.add(box)
 
@@ -458,6 +453,11 @@ class TempWatch(Gtk.Application):
         gc.set_threshold(25000, 25, 25)
         self._update_indicator(discover())
         win.show_all()
+
+    def _on_state(self, win: Any, ev: Any) -> bool:
+        if ev.new_window_state & Gdk.WindowState.ICONIFIED:
+            win.hide()
+        return False
 
     def _color_cell(self, _col: Any, cell: Any, model: Any, it: Any,
                     _data: Any = None) -> None:
