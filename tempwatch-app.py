@@ -394,6 +394,23 @@ class TempWatch(Gtk.Application):
             return
         win = self.win = Gtk.ApplicationWindow(application=self, title="TempWatch")
         win.set_default_size(760, 500)
+        # Own the titlebar (client-side decorations): GNOME's server-side
+        # minimize is an unobservable no-op for Wayland apps, so we draw the
+        # header ourselves and wire − to hide() — Solaar behaviour: the
+        # window closes, no dock/sidebar ghost, the app keeps running in
+        # the tray.
+        bar = Gtk.HeaderBar()
+        bar.set_show_close_button(True)
+        bar.set_title("TempWatch")
+        bar.set_decoration_layout("icon:maximize,close")
+        min_b = Gtk.Button()
+        min_b.add(Gtk.Image.new_from_icon_name("window-minimize-symbolic",
+                                               Gtk.IconSize.BUTTON))
+        min_b.set_tooltip_text("Minimize to tray")
+        min_b.set_can_focus(False)
+        min_b.connect("clicked", lambda *_a: win.hide())
+        bar.pack_end(min_b)
+        win.set_titlebar(bar)
         with contextlib.suppress(Exception):
             win.set_icon_from_file(ICON)
         win.set_role("tempwatch-main")
