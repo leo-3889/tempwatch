@@ -401,10 +401,10 @@ class TempWatch(Gtk.Application):
         # The tray (top-bar) icon's "Show TempWatch" is how you get back.
         win.set_skip_taskbar_hint(True)
         win.set_skip_pager_hint(True)
-        # Solaar-style: minimize hides to tray; close (X) hides to the
-        # tray too — quitting is via the tray menu (or SIGTERM).
+        # minimize hides to the tray (no taskbar entry exists); close (X)
+        # quits the app.
         win.connect("window-state-event", self._on_state)
-        win.connect("delete-event", lambda *_a: (win.hide(), True)[1])
+        win.connect("delete-event", lambda *_a: (self.quit(), False)[1])
 
     def _on_state(self, win: Any, ev: Any) -> bool:
         if ev.new_window_state & Gdk.WindowState.ICONIFIED:
@@ -456,9 +456,7 @@ class TempWatch(Gtk.Application):
         gc.collect()
         gc.freeze()               # steady-state: only scan per-tick garbage
         gc.set_threshold(25000, 25, 25)
-        with contextlib.suppress(Exception):  # tray-less DEs: window only
-            self._make_indicator()
-            self._update_indicator(discover())
+        self._update_indicator(discover())
         win.show_all()
 
     def _color_cell(self, _col: Any, cell: Any, model: Any, it: Any,
