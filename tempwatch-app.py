@@ -369,9 +369,11 @@ class TempWatch(Gtk.Application):
         with contextlib.suppress(Exception):
             win.set_icon_from_file(ICON)
         win.set_role("tempwatch-main")
-        # stay out of the dash/dock: only the tray (top-bar) icon represents
-        # the app; a utility window is not tracked as an app window
-        win.set_type_hint(Gdk.WindowTypeHint.UTILITY)
+        # No dock/sidebar entry (GNOME treats the app as a background app);
+        # unlike a UTILITY hint this keeps the minimize button working.
+        # The tray (top-bar) icon's "Show TempWatch" is how you get back.
+        win.set_skip_taskbar_hint(True)
+        win.set_skip_pager_hint(True)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         win.add(box)
