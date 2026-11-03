@@ -204,9 +204,9 @@ class TempWatch(Gtk.Application):
         self.ind = None  # optional tray/top-bar indicator
         self._ind_last: tuple = ()
         self.pinned: str | None = None
-        with contextlib.suppress(Exception):
-            with open(os.path.expanduser("~/.config/tempwatch-pin.json")) as f:
-                self.pinned = json.load(f).get("row")
+        with contextlib.suppress(Exception), \
+                open(os.path.expanduser("~/.config/tempwatch-pin.json")) as f:
+            self.pinned = json.load(f).get("row")
         self.vitals = self._open_vitals()
 
     def _open_vitals(self) -> "Gio.Settings | None":
@@ -374,6 +374,15 @@ class TempWatch(Gtk.Application):
         # The tray (top-bar) icon's "Show TempWatch" is how you get back.
         win.set_skip_taskbar_hint(True)
         win.set_skip_pager_hint(True)
+        # Dropbox-style: minimize hides to the tray icon, close quits,
+        # tray menu "Show TempWatch" brings it back.
+        win.connect("window-state-event", self._on_state)
+        win.connect("delete-event", lambda *_a: (self.quit(), False)[1])
+
+    def _on_state(self, win: Any, ev: Any) -> bool:
+        if ev.new_window_state & Gdk.WindowState.ICONIFIED:
+            win.hide()
+        return False
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         win.add(box)
