@@ -30,7 +30,7 @@ jobs:
           ast.parse(open("/usr/share/tempwatch/tempwatch-app.py").read())
           EOF
           command -v tempwatch tempwatch-tui
-          test -x /usr/bin/tempwatch /usr/bin/tempwatch-tui
+          test -x /usr/bin/tempwatch && test -x /usr/bin/tempwatch-tui
           dpkg -l tempwatch | tail -1
 
       - name: Checksums
