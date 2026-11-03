@@ -23,6 +23,7 @@ from gi.repository import GLib, Gio, Gtk  # type: ignore[import-not-found]  # is
 
 HWMON = "/sys/class/hwmon"
 APP_ID = "dev.leo.tempwatch"
+VITALS_SCHEMA = "org.gnome.shell.extensions.vitals"
 ICON = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tempwatch-icon.svg")
 HISTORY = 180  # seconds of trend shown per sensor
 
@@ -201,8 +202,9 @@ class TempWatch(Gtk.Application):
         self.spark = SparkRenderer()
         self.ind = None  # optional tray/top-bar indicator
         self.vitals: Gio.Settings | None = None  # Vitals shell extension
-        with contextlib.suppress(Exception):
-            self.vitals = Gio.Settings.new("org.gnome.shell.extensions.vitals")
+        src = Gio.SettingsSchemaSource.get_default()
+        if src is not None and src.lookup(VITALS_SCHEMA, True) is not None:
+            self.vitals = Gio.Settings.new(VITALS_SCHEMA)
 
     # --- top-bar (Vitals extension) pinning -------------------------------
 
