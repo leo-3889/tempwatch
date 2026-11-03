@@ -325,9 +325,6 @@ class TempWatch(Gtk.Application):
         show = Gtk.MenuItem(label="Show TempWatch")
         show.connect("activate", self._show_window)
         menu.append(show)
-        reset_i = Gtk.MenuItem(label="Show hottest sensor")
-        reset_i.connect("activate", self._unpin)
-        menu.append(reset_i)
         menu.append(Gtk.SeparatorMenuItem())
         quit_i = Gtk.MenuItem(label="Quit")
         quit_i.connect("activate", lambda *_: self.quit())
@@ -363,16 +360,6 @@ class TempWatch(Gtk.Application):
         if self.ind is not None:
             self.ind.set_status(2)  # IndicatorStatus.NEVER
         Gtk.Application.do_shutdown(self)
-
-    def _unpin(self, *_a) -> None:
-        self.pinned = None
-        self._save_pin()
-        vs = self.vitals
-        if vs is not None:
-            rows = discover()
-            app_keys = {self._vitals_key(sid, rows) for sid, *_x in rows}
-            vs.set_strv("hot-sensors", [k for k in self._hot_sensors()
-                                        if k not in app_keys])
 
     def _update_indicator(self, rows) -> None:
         if self.ind is None or not rows:

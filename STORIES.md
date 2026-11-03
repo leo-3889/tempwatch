@@ -1,7 +1,8 @@
 # ⚡ TempWatch — Product Backlog (User Stories)
 
-Source of truth: `tempwatch-app.py` (GTK app, 509 lines), `tempwatch.py` (TUI, 215 lines),
-`test_tempwatch.py` (7 passing checks incl. module-import smoke), `install.sh`,
+Source of truth: `tempwatch-app.py` (GTK app, 526 lines), `tempwatch.py` (TUI, 215 lines),
+`test_tempwatch.py` (14 tests, all passing: 13 test functions + module load of
+`tempwatch-app.py` via importlib asserted at import), `install.sh`,
 `uninstall.sh`, `packaging/build_deb.sh`, `.github/workflows/release.yml`, `README.md`.
 
 AC evidence tags:
@@ -17,19 +18,19 @@ Status tags: `[implemented@file:line]` per story; no citation = `[guess]`.
 
 As a **Ryzen/ASUS desktop user** I want a table of every temperature sensor with a plain-language name, live color-coded value, session min/max, firmware limit, and a 3-minute sparkline so that I can spot a overheating component without reading raw `temp1_input` labels.
 
-Implemented: `discover()` tempwatch-app.py:104-148, `color_for()` :156-160, `SparkRenderer` :163-189, columns :425-441, `tick()` :478-505.
+Implemented: `discover()` tempwatch-app.py:103-147, `color_for()` :155-159, `SparkRenderer` :163-189, columns :440-450, `tick()` :495-522.
 
 Acceptance Criteria:
 1. REQ-S1-01. The window (760×500 default, title "TempWatch", role `tempwatch-main`) contains a TreeView with exactly the columns Sensor, Now, Min, Max, Limit, and "Temperature over time (last 3 min)" (expanded, min 140px). — TODO: test `test_table_columns_built` (ast/structural assert on the `("Sensor",…),("Now",…),…` tuple + spark column title in `do_activate`)
 2. REQ-S1-02. `k10temp Tctl` displays as "CPU Package (Tctl)", `Tccd1` as "CPU CCD 1 (Tccd1)", `spd5118` instance 1 as "Memory Stick 1", `nct6799 AUXTIN3` as "TSENSOR1 Custom Probe", `nvme Composite` as "NVMe SSD 1". — ✅ test_discover
 3. REQ-S1-03. The Now cell is markup-colored `#2ec27e`/`#e5a50a`/`#c01c28` per `color_for(v, hi, crit)`: red when `v >= crit-5`, red when `v >= hi` and `v >= crit-15`, yellow when `v >= hi`, green otherwise. — ✅ test_color_for
 4. REQ-S1-04. Min/Max columns show per-sensor session extremes accumulated from first tick (keyed by `driver|hwmon|tempN`, survives sensor reordering). — TODO: test `test_tick_updates_session_stats`
-5. REQ-S1-05. Limit column shows `tempN_max` rounded (`NN°`), falling back to `tempN_crit`, else literal `—`. — TODO: test `test_limit_fallback_chain`
+5. REQ-S1-05. Limit column shows `tempN_max` rounded (`NN°`), falling back to `tempN_crit`, else literal `—`. — ✅ test_discovery_robustness (drives `app.tick()` on a fake hwmon with `_crit` set and `_max` absent → Limit cell renders `95°`; the `—` branch is exercised in the same run's store row for sensors with no thresholds).
 6. REQ-S1-06. Each row's sparkline renders its last 180 one-second samples (`deque(maxlen=HISTORY)`, HISTORY=180), auto-scaled to the series min/max with a 4.0°C minimum range, colored by the row's threshold color; rows with <2 samples draw nothing. — TODO: test `test_spark_series_window_and_scale`
 7. REQ-S1-07. Header shows `⚡ TempWatch — <hostname>` and an `updated HH:MM:SS` stamp refreshed each second; footer reads "min/max are session values · limits from firmware · chart auto-scales per sensor". — MANUAL
 8. REQ-S1-08. Rows disappearing from hwmon (module unload, USB probe unplug) vanish from the store and their history is freed within 1 s. — TODO: test `test_tick_prunes_stale_rows`
 
-Tests: `test_discover` (AC2), `test_color_for` (AC3), `test_activate_builds_ui` (guards `do_activate` has no nested defs and ends with `show_all` — partial AC1).
+Tests: `test_discover` (AC2), `test_color_for` (AC3), `test_discovery_robustness` (AC5, calls `app.tick()`), `test_activate_builds_ui` (guards `do_activate` has no nested defs and ends with `show_all` — partial AC1).
 
 ---
 
@@ -57,15 +58,15 @@ Implemented: `_on_row_click` tempwatch-app.py:299-314, `_pin_vitals` :275-297, `
 
 Acceptance Criteria:
 1. REQ-S3-01. Right-click (button 3) on a row pops a menu with the single item "Show value in taskbar"; left-click and clicks on empty rows do nothing; the menu only appears when the Vitals schema was found. — MANUAL
-2. REQ-S3-02. The pin key equals Vitals v86's display key `<chipname> <label>` with `Package id`→`CPU` (e.g. `k10temp Tctl`, `nct6799 AUXTIN3`); labelless sensors use the sysfs key (`spd5118 temp1`); NVMe uses `<chip> <model> <key>`. — ✅ test_vitals_keys
-3. REQ-S3-03. Duplicate base keys get Vitals-style dedup suffixes in enumeration order: first `spd5118 temp1`, second `spd5118 temp1 2`. — ✅ test_vitals_keys
-4. REQ-S3-04. After pinning, `gsettings get org.gnome.shell.extensions.vitals hot-sensors` contains exactly one app-produced key — every key in the app's key-set is removed first, the chosen key appended; foreign keys (e.g. `_memory_usage_`, user-curated keys for drivers TempWatch doesn't know) are preserved verbatim. — ✅ test_single_slot (list arithmetic; the `set_strv` call itself is TODO: test `test_pin_writes_hot_sensors`)
+2. REQ-S3-02. The pin key equals Vitals v86's display key `<chipname> <label>` with `Package id`→`CPU` (e.g. `k10temp Tctl`, `nct6799 AUXTIN3`); labelless sensors use the sysfs key (`spd5118 temp1`); NVMe uses `<chip> <model> <key>`. — ✅ test_vitals_keys (k10temp/nct6799/spd5118 keys), ✅ test_vitals_keys_nvme_and_dedup (NVMe `nvme WDS100T2B0A-00SM50 temp1`, both call `app._vitals_key`)
+3. REQ-S3-03. Duplicate base keys get Vitals-style dedup suffixes in enumeration order: first `spd5118 temp1`, second `spd5118 temp1 2`, third `spd5118 temp1 3`. — ✅ test_vitals_keys, ✅ test_vitals_keys_nvme_and_dedup (three-DIMM ` 2`/` 3` chain via `app._vitals_key`)
+4. REQ-S3-04. After pinning, `gsettings get org.gnome.shell.extensions.vitals hot-sensors` contains exactly one app-produced key — every key in the app's key-set is removed first, the chosen key appended; foreign keys (e.g. `_memory_usage_`, user-curated keys for drivers TempWatch doesn't know) are preserved verbatim. — TODO: test `test_pin_vitals_sweeps_app_keys` (drive `app._pin_vitals` with a mock-free stub settings object recording `get_strv`/`set_strv`/`get_int`/`set_int`/`get_boolean`/`set_boolean`, fake `self.vitals`; assert appended key + preserved foreign keys). `test_single_slot` does NOT count: it hand-replicates the sweep list arithmetic inside the test and never calls `_pin_vitals`.
 5. REQ-S3-05. On pin, `position-in-panel` is set to `2` (right, next to the tray) only if it currently differs; a user-set value of 2 is not rewritten. — TODO: test `test_pin_sets_panel_position_once`
 6. REQ-S3-06. After writing `hot-sensors`, the app toggles `show-temperature` off and back on (v86 has no `changed::hot-sensors` handler) so the panel repaints without a shell reload, leaving `show-temperature` at its original value. — TODO: test `test_show_temperature_nudge_restores_value`
 7. REQ-S3-07. Vitals schema is resolved from the extension dir (`~/.local/share` then `/usr/share`, `Vitals@CoreCoding.com/schemas/gschemas.compiled`) so pinning works from a normal (non-extension) process; absent schema → right-click is inert, app runs. — MANUAL
 8. REQ-S3-08. On a GNOME 50 session the pinned value is visible in the top bar within 1 s of the click, no shell reload needed. — MANUAL
 
-Tests: `test_vitals_keys` (AC2, AC3), `test_single_slot` (AC4 arithmetic).
+Tests: `test_vitals_keys` + `test_vitals_keys_nvme_and_dedup` (AC2, AC3). AC4-6 have no valid automated coverage — `test_single_slot` replicates the arithmetic in-test without calling app code.
 
 ---
 
@@ -78,10 +79,10 @@ Implemented: load tempwatch-app.py:206-209, `_save_pin` :353-360, `_unpin` :367-
 Acceptance Criteria:
 1. REQ-S4-01. Pinning writes `{"row": "<driver>|<hwmon>|<tempN>"}` to `~/.config/tempwatch-pin.json` (mkdir -p `~/.config`); a missing/unreadable/corrupt file is suppressed and leaves `pinned=None` (app must not crash on a garbage file). — TODO: test `test_pin_file_roundtrip_and_corruption`
 2. REQ-S4-02. On startup the pinned row is restored from that file and drives the indicator label priority (REQ-S2-03). — TODO: test `test_startup_restores_pinned_row`
-3. REQ-S4-03. "Show hottest sensor" (unpin) sets `pinned=None`, persists it, and rewrites `hot-sensors` = current keys minus the app's full key-set (all drivers TempWatch enumerates today), keeping foreign keys. — ✅ test_single_slot (sweep arithmetic) + TODO: test `test_unpin_writes_hot_sensors`
-4. REQ-S4-04. At any moment `hot-sensors` contains ≤1 key from the app's key-set (single slot — a second pin replaces the first; sweep-before-append guarantees it even if a stale key from a previous session lingers). — ✅ test_single_slot
+3. REQ-S4-03. "Show hottest sensor" (unpin) sets `pinned=None`, persists it, and rewrites `hot-sensors` = current keys minus the app's full key-set (all drivers TempWatch enumerates today), keeping foreign keys. — TODO: test `test_unpin_writes_hot_sensors` (call `app._unpin` with the stub settings object from S3-04; assert swept strv written and `pinned=None` persisted). `test_single_slot` does NOT count — hand-replicated arithmetic, never calls `_unpin`.
+4. REQ-S4-04. At any moment `hot-sensors` contains ≤1 key from the app's key-set (single slot — a second pin replaces the first; sweep-before-append guarantees it even if a stale key from a previous session lingers). — TODO: test `test_pin_vitals_sweeps_app_keys` (shared with REQ-S3-04: pin A then pin B via `app._pin_vitals`, assert stub `set_strv` payload has ≤1 app key)
 
-Tests: `test_single_slot` (AC3/4 arithmetic).
+Tests: none valid — `test_single_slot` computes its own `hot = [k for k in hot if k not in app_keys] + [new]` list in-test and never invokes `_pin_vitals`/`_unpin`; it proves the *idea*, not the code.
 
 ---
 
@@ -89,14 +90,15 @@ Tests: `test_single_slot` (AC3/4 arithmetic).
 
 As a **user who wants the monitor out of the way** I want the minimize button to hide the window completely (no minimized-window ghost, no taskbar entry) while the app keeps sampling in the tray, so that the top-bar readout stays live.
 
-Implemented: `_on_state` tempwatch-app.py:458-464, `set_skip_taskbar_hint`/`set_skip_pager_hint` :403-404, per-second `tick` continues on hidden window :478.
+Implemented: `_on_state` tempwatch-app.py:475-481, custom titlebar with − button wired `clicked → win.hide()` :405-413 (`set_titlebar` :413), `set_skip_taskbar_hint`/`set_skip_pager_hint` :420-421, per-second `tick` continues on hidden window :495.
 
 Acceptance Criteria:
 1. REQ-S5-01. On the `window-state-event` ICONIFIED transition the handler calls `win.hide()` and returns `False` (no minimized state lingers); FOCUSED/other states leave visibility untouched. — ✅ test_on_state_minimize
 2. REQ-S5-02. After minimize the process stays alive (`pgrep -f tempwatch-app.py` = 1), the tick keeps updating the indicator, and no window exists in the GNOME overview / `wmctrl -l` (Wayland: window count via Looking Glass). — MANUAL
 3. REQ-S5-03. Tray "Show TempWatch" restores: `deiconify` + `show` + `present` (:338-343), window regains focus. — MANUAL
+4. REQ-S5-04. The window's custom titlebar ships its own − button (decoration layout drops the default minimize, `"icon:maximize,close"`) wired `clicked → win.hide()`, so minimize works on Wayland where the SSD minimize is a no-op. — ✅ test_minimize_button_wired (ast: `set_titlebar` in `do_activate` + a `"clicked"` connection whose body contains `win.hide()`)
 
-Tests: `test_on_state_minimize` (AC1).
+Tests: `test_on_state_minimize` (AC1, calls `app._on_state`), `test_minimize_button_wired` (AC4, ast guard on `do_activate`).
 
 ---
 
@@ -104,13 +106,13 @@ Tests: `test_on_state_minimize` (AC1).
 
 As a **user finishing a session** I want the window's close button to fully quit the app so that no invisible poller and no tray icon remain.
 
-Implemented: `delete-event` tempwatch-app.py:408 — `lambda *_a: (self.quit(), False)[1]`; `do_shutdown` indicator NEVER :362-365.
+Implemented: `delete-event` tempwatch-app.py:425 — `lambda *_a: (self.quit(), False)[1]`; `do_shutdown` indicator NEVER :362-365.
 
 Acceptance Criteria:
 1. REQ-S6-01. Clicking the (X) (delete-event) invokes `self.quit()` and the handler returns `False` (GTK proceeds with destruction); app `do_shutdown` runs, indicator set NEVER. — TODO: test `test_delete_event_quits` (invoke the connected lambda on a stub with `quit()`, assert called and return `False`)
 2. REQ-S6-02. After close: `pgrep -f tempwatch-app.py` = 0 and the tray icon is gone from the top bar. — MANUAL
 
-Tests: none — AC1 needs `test_delete_event_quits`; `test_activate_builds_ui` only guards structure of `do_activate`.
+Tests: `test_window_structure` ast-guards that `do_activate` connects `delete-event` and the wiring references `self.quit` (structural half of AC1); the runtime contract (handler returns `False`, process exits) needs `test_delete_event_quits`.
 
 ---
 
@@ -148,19 +150,19 @@ Tests: none — AC1/2 need new tests.
 
 As a **maintainer adding hardware** I want every platform's naming/filtering rules in one `SOURCES` table so that supporting a new hwmon driver is a single dict entry plus an `ORDER` position, not a code change.
 
-Implemented: `SOURCES` tempwatch-app.py:61-79, `ORDER` :35, `discover()` :104-148, `gpu_title` :49-53; README "Extending to new platforms".
+Implemented: `SOURCES` tempwatch-app.py:61-79, `ORDER` :33, `discover()` :103-147, `gpu_title` :49-53; README "Extending to new platforms".
 
 Acceptance Criteria:
 1. REQ-S9-01. `SOURCES` covers exactly `k10temp, coretemp, spd5118, nct6799, asus, amdgpu, nvidia, nvme`, displayed in `ORDER` sequence (k10temp → coretemp → spd5118 → nct6799 → asus → amdgpu → nvidia → nvme). — ✅ test_discover (ordering assert `["k10temp","k10temp","spd5118","nct6799","nvme"]`)
 2. REQ-S9-02. `nct6799` is `mapped_only`: `SYSTIN/CPUTIN/AUXTIN0/AUXTIN3/AUXTIN4` map to friendly names with `AUXTIN3` = "TSENSOR1 Custom Probe" (TSENSOR1 header on ASUS ProArt B850-CREATOR WIFI NEO); unmapped AUXTINs (e.g. AUXTIN1) are dropped. — ✅ test_discover
-3. REQ-S9-03. `nvme` keeps `{"Composite"}` only — per-SSD non-composite sensors (e.g. a second temp labeled for a flash chip) never appear; composite name is the section title "NVMe SSD N". — TODO: test `test_nvme_composite_only`
+3. REQ-S9-03. `nvme` keeps `{"Composite"}` only — per-SSD non-composite sensors (e.g. a second temp labeled for a flash chip) never appear; composite name is the section title "NVMe SSD N". — ✅ test_nvme_naming (two Composite drives → exactly `["NVMe SSD 1", "NVMe SSD 2"]`; phantom `Sensor 1`/`Sensor 2` labels filtered; `Composite` never in names — calls `m.discover()`)
 4. REQ-S9-04. GPU sources (`amdgpu`, `nvidia`) are `mapped_only` + `prefix`: section title from `product_name` sysfs (fallback `Graphics Adapter <idx>`), names `GPU · Core` / `GPU · Hotspot` / `GPU · Memory (GDDR)` (amdgpu edge/junction/mem) and Core/Memory/Hotspot (nvidia). — TODO: test `test_gpu_prefix_and_title_fallback`
 5. REQ-S9-05. Drivers not in `SOURCES` (r8169, iwl_5000_series, battery…) produce zero rows. — ✅ test_discover (r8169 ignored)
-6. REQ-S9-06. `k10temp` is `mapped_only` (Tctl/Tccd1/Tccd2 only; TDDOTCRITICAL-class entries dropped); `coretemp` maps "Package id 0"→"CPU Package" and keeps unmapped cores as `CPU · Core N`; `spd5118` keeps all labels as "Memory Stick <idx>". — TODO: test `test_coretemp_core_passthrough`
+6. REQ-S9-06. `k10temp` is `mapped_only` (Tctl/Tccd1/Tccd2 only; TDDOTCRITICAL-class entries dropped); `coretemp` maps "Package id 0"→"CPU Package" and keeps unmapped cores as `CPU · Core N`; `spd5118` keeps all labels as "Memory Stick <idx>". — ✅ test_cpu_naming (`Package id 0`→`CPU Package`, unmapped core → `CPU · Core 0`, via `m.discover()`), ✅ test_sources_invariants (every `SOURCES` entry has title/labels/mapped_only; `mapped_only` driver nct6799 drops unmapped AUXTIN1/PCI/SN — calls `m.discover()`)
 7. REQ-S9-07. On real hardware (ProArt B850-CREATOR WIFI NEO): the TSENSOR1 header reading appears as "TSENSOR1 Custom Probe"; `coretemp` path validated on Intel; `asus` (WMI) section "Motherboard (ASUS WMI)" appears only where asus_wmi exposes hwmon. — MANUAL
 8. REQ-S9-08. A new platform works by adding one `SOURCES` entry + one `ORDER` item with zero changes to `discover()`; a sensor with an unreadable `_input` value is skipped, a missing `_label` defaults to "Temp" (name collapses to section title). — TODO: test `test_new_driver_entry_only`
 
-Tests: `test_discover` (AC1, AC2, AC5).
+Tests: `test_discover` (AC1, AC2, AC5), `test_nvme_naming` (AC3), `test_cpu_naming` + `test_sources_invariants` (AC6), `test_discovery_robustness` (AC8 non-numeric `_input` skipped).
 
 ---
 
@@ -177,7 +179,7 @@ Acceptance Criteria:
 4. REQ-S10-04. `dist/SHA256SUMS.txt` covers every artifact (deb + `.orig.tar.gz`) and all of `dist/*` are attached to the GitHub Release with generated release notes; deb version = tag minus leading `v`. — MANUAL (verify on the released release page)
 5. REQ-S10-05. After `sudo dpkg -i` on a clean Ubuntu: `dpkg -l tempwatch` shows `ii`, `/etc/modules-load.d/nct6775.conf` exists; after `sudo apt remove tempwatch` (prerm) the confs are gone. — MANUAL
 
-Tests: none — CI has no repo-side assertions yet; AC1-3 are the new proposed tests. The suite itself is gated by the workflow's Tests step (all 7 existing checks).
+Tests: none — CI has no repo-side assertions yet; AC1-3 are the new proposed tests. The suite itself is gated by the workflow's Tests step (all 14 existing tests).
 
 ---
 
@@ -267,4 +269,4 @@ Tests: none — docs-drift tests proposed.
 
 ---
 
-*Tally: 13 stories, 63 acceptance criteria — 11 ✅ (automated today), 36 TODO (test proposed), 16 MANUAL (GNOME desktop check). REQ-S4-03 is both ✅ (arithmetic) and TODO (set_strv call).*
+*Tally: 13 stories, 64 acceptance criteria — 12 ✅ (ACs proven by tests that call app code), 34 TODO (test proposed), 18 MANUAL (GNOME desktop check). ✅ list: S1-02, S1-03, S1-05, S3-02, S3-03, S5-01, S5-04, S9-01, S9-02, S9-03, S9-05, S9-06 (S3-02/S3-03 each cite two tests). Demoted to TODO: S3-04, S4-03, S4-04 — `test_single_slot` hand-replicates list arithmetic in-test and never calls `_pin_vitals`/`_unpin`. Added REQ-S5-04 (custom-titlebar − button, proven by `test_minimize_button_wired`).*
