@@ -24,18 +24,55 @@ APP_ID = "dev.leo.tempwatch"
 ICON = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tempwatch-icon.svg")
 HISTORY = 180  # seconds of trend shown per sensor
 
-NAMES = {"k10temp": "CPU", "spd5118": "DRAM", "amdgpu": "GPU", "nct6799": "Board"}
-ORDER = ["k10temp", "spd5118", "nct6799", "amdgpu"]
+NAMES = {"k10temp": "CPU", "coretemp": "CPU", "spd5118": "DRAM", "amdgpu": "GPU",
+         "nvidia": "GPU", "nct6799": "Board", "nvme": "NVMe", "asus": "ASUS WMI"}
+ORDER = ["k10temp", "coretemp", "spd5118", "nct6799", "asus", "amdgpu", "nvidia", "nvme"]
 WANT = set(NAMES)
 
 # plain-language names per raw label
 CPU_NAMES = {"Tctl": "CPU Package (Tctl)", "Tccd1": "CPU CCD 1 (Tccd1)",
              "Tccd2": "CPU CCD 2 (Tccd2)"}
+CORETEMP_NAMES = {"Package id 0": "CPU Package", "Package": "CPU Package"}
 BOARD_NAMES = {"SYSTIN": "Motherboard (SYSTIN)", "CPUTIN": "CPU Socket (CPUTIN)",
                "AUXTIN0": "Board Sensor (AUXTIN0)",
                "AUXTIN3": "TSENSOR1 Custom Probe",   # user-confirmed header
                "AUXTIN4": "Board Sensor (AUXTIN4)"}
 GPU_KEEP = {"edge": "Core", "junction": "Hotspot", "mem": "Memory (GDDR)"}
+NVIDIA_KEEP = {"GPU Core Temp": "Core", "GPU Memory Temp": "Memory",
+               "GPU Hot Spot Temp": "Hotspot"}
+
+
+def gpu_title(idx: int, hwmon_dir: str) -> str:
+    for p in glob.glob(f"{hwmon_dir}/device/drm/card*/device/product_name"):
+        name = read_str(p)
+        if name and name.lower() not in ("amd rocm", "unknown"):
+            return name
+    return f"Graphics Adapter {idx}"
+
+
+# Sensor source registry: one entry per hwmon driver = one platform support
+# unit.  title(idx, dir) -> section name; labels maps raw label -> friendly
+# name (None = keep all sensors as-is); mapped_only drops unmapped labels.
+# Adding a platform = adding one entry + one ORDER item. See README.
+SOURCES: dict[str, dict] = {
+    "k10temp":  {"title": lambda i, d: "CPU", "labels": CPU_NAMES,
+                 "mapped_only": True},
+    "coretemp": {"title": lambda i, d: "CPU", "labels": CORETEMP_NAMES,
+                 "mapped_only": False},
+    "spd5118":  {"title": lambda i, d: f"Memory Stick {i}", "labels": None,
+                 "mapped_only": False},
+    "nct6799":  {"title": lambda i, d: "Motherboard", "labels": BOARD_NAMES,
+                 "mapped_only": True},
+    "asus":     {"title": lambda i, d: "Motherboard (ASUS WMI)",
+                 "labels": None, "mapped_only": False},
+    "amdgpu":   {"title": gpu_title, "labels": GPU_KEEP, "mapped_only": True,
+                 "prefix": True},
+    "nvidia":   {"title": gpu_title, "labels": NVIDIA_KEEP, "mapped_only": True,
+                 "prefix": True},
+    "nvme":     {"title": lambda i, d: f"NVMe SSD {i}",
+                 "labels": None, "mapped_only": False,
+                 "keep": {"Composite"}},   # drive's composite temp only
+}
 
 FG_RGB = [(0.18, 0.76, 0.49, 1.0), (0.90, 0.65, 0.04, 1.0), (0.75, 0.11, 0.16, 1.0)]
 FG_HEX = ("#2ec27e", "#e5a50a", "#c01c28")
@@ -59,14 +96,6 @@ def read_temp(path: str) -> float | None:
         return None
 
 
-def gpu_name(hwmon_dir: str, fallback: str) -> str:
-    for p in glob.glob(f"{hwmon_dir}/device/drm/card*/device/product_name"):
-        name = read_str(p)
-        if name and name.lower() not in ("amd rocm", "unknown"):
-            return name
-    return fallback
-
-
 def discover() -> list[tuple[str, str, float, float | None, float | None]]:
     """[(id, display_name, cur, high, crit), ...] ordered by section."""
     out: list[tuple[str, str, float, float | None, float | None]] = []
@@ -77,17 +106,12 @@ def discover() -> list[tuple[str, str, float, float | None, float | None]]:
         return out
     for h in hs:
         d = os.path.join(HWMON, h)
-        driver = read_str(os.path.join(d, "name"))
-        if driver not in WANT:
+        driver = read_str(os.path.join(d, "name")) or ""
+        src = SOURCES.get(driver)
+        if src is None:
             continue
         inst[driver] += 1
-        n = inst[driver]
-        if driver == "spd5118":
-            section = f"Memory Stick {n}"
-        elif driver == "amdgpu":
-            section = gpu_name(d, f"Graphics Adapter {n}")
-        else:
-            section = NAMES[driver]
+        section = src["title"](inst[driver], d)
         try:
             files = sorted(os.listdir(d))
         except OSError:
@@ -100,18 +124,19 @@ def discover() -> list[tuple[str, str, float, float | None, float | None]]:
             if cur is None:
                 continue
             label = read_str(f"{d}/{key}_label") or "Temp"
-            if driver == "k10temp":
-                name = CPU_NAMES.get(label, f"CPU · {label}")
-            elif driver == "spd5118":
-                name = section
-            elif driver == "nct6799":
-                if label not in BOARD_NAMES:
+            keep = src.get("keep")
+            if keep is not None and label not in keep:
+                continue
+            labels = src["labels"]
+            mapped = None
+            if labels is not None:
+                mapped = labels.get(label) or labels.get(label.lower())
+                if mapped is None and src["mapped_only"]:
                     continue
-                name = BOARD_NAMES[label]
-            else:  # amdgpu
-                if label.lower() not in GPU_KEEP:
-                    continue
-                name = f"{section} · {GPU_KEEP[label.lower()]}"
+            name = mapped or (section if label in ("Temp", "Composite")
+                              else f"{section} · {label}")
+            if mapped and src.get("prefix"):
+                name = f"{section} · {mapped}"
             out.append((f"{driver}|{h}|{key}", name, cur,
                         read_temp(f"{d}/{key}_max"), read_temp(f"{d}/{key}_crit")))
     out.sort(key=lambda r: ORDER.index(r[0].split("|")[0]))

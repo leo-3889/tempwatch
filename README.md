@@ -54,8 +54,31 @@ Releases with prebuilt `.deb` files are on the
   the ASUS "EC" is SMI-only and exposes nothing on Linux)
 - AMD GPUs — `amdgpu`
 
-Anything without a hwmon interface (e.g. NVIDIA-only sensor stacks, laptop
-ECs) simply does not appear.
+Anything without a hwmon interface (laptop ECs without `asus_wmi`/`dybus`
+exposure, proprietary embedded controllers) simply does not appear.
+
+## Extending to new platforms
+
+All platform support lives in one table in `tempwatch-app.py`:
+
+```python
+SOURCES = {
+  "<hwmon driver name>": {
+      "title":  lambda idx, hwmon_dir: "Section Name",   # per-device section
+      "labels": {"raw_label": "Friendly Name"} | None,   # renames; None = as-is
+      "mapped_only": True | False,                        # drop unmapped labels?
+      "prefix": True,          # optional: name as "Section · Label" (GPUs)
+      "keep":   {"Composite"}, # optional: whitelist of raw labels
+  },
+  ...
+}
+```
+
+Adding a platform = adding one `SOURCES` entry + its position in `ORDER`
+(section sort order). Ships with: `k10temp`, `coretemp`, `spd5118`,
+`nct6775` (nct6799), ASUS WMI, `amdgpu`, `nvidia`, `nvme`. Anything that
+exposes `/sys/class/hwmon` (Raspberry Pi, Intel laptops, NVMe drives,
+hwmon-attached USB probes) works by adding the driver name.
 
 ## Uninstall
 
