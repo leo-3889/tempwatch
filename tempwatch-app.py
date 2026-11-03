@@ -194,8 +194,7 @@ class SparkRenderer(Gtk.CellRenderer):
 
 class TempWatch(Gtk.Application):
     def __init__(self) -> None:
-        super().__init__(application_id=APP_ID,
-                         flags=Gio.ApplicationFlags.NON_UNIQUE)
+        super().__init__(application_id=APP_ID)
         self.stats: dict[str, tuple[float, float]] = {}
         self.hist: dict[str, deque] = {}
         self.win: Gtk.ApplicationWindow | None = None
@@ -341,6 +340,11 @@ class TempWatch(Gtk.Application):
                       "w") as f:
                 json.dump({"row": self.pinned}, f)
 
+    def do_shutdown(self) -> None:
+        if self.ind is not None:
+            self.ind.set_status(2)  # IndicatorStatus.NEVER
+        Gtk.Application.do_shutdown(self)
+
     def _unpin(self, *_a) -> None:
         self.pinned = None
         self._save_pin()
@@ -364,6 +368,11 @@ class TempWatch(Gtk.Application):
         self.ind.set_title(f"TempWatch — hottest {hot[1]} {hot[2]:.1f}°")
 
     def do_activate(self) -> None:
+        if self.win is not None:  # second launch (app grid): show existing
+            self.win.deiconify()
+            self.win.show()
+            self.win.present()
+            return
         win = self.win = Gtk.ApplicationWindow(application=self, title="TempWatch")
         win.set_default_size(760, 500)
         with contextlib.suppress(Exception):
