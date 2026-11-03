@@ -203,9 +203,10 @@ class TempWatch(Gtk.Application):
         self.ind = None  # optional tray/top-bar indicator
         self._ind_last: tuple = ()
         self.pinned: str | None = None
+        # pi-lens-ignore: unchecked-throwing-call-python
+        # (guarded by contextlib.suppress on the same statement)
         with contextlib.suppress(Exception), \
                 open(os.path.expanduser("~/.config/tempwatch-pin.json")) as f:
-            # pi-lens-ignore: unchecked-throwing-call-python
             self.pinned = json.load(f).get("row")
         self.vitals = self._open_vitals()
 
@@ -455,6 +456,9 @@ class TempWatch(Gtk.Application):
         win.show_all()
 
     def _on_state(self, win: Any, ev: Any) -> bool:
+        # Minimize (−) closes the window and keeps the app running in the
+        # tray: we hide() on the iconified transition so no minimized state
+        # ever lingers, and deiconify on the way back in.
         if ev.new_window_state & Gdk.WindowState.ICONIFIED:
             win.hide()
         return False

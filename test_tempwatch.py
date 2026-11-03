@@ -120,10 +120,28 @@ def test_activate_builds_ui():
     print("test_activate_builds_ui ok")
 
 
+def test_on_state_minimize():
+    """Minimize hides the window; other states don't touch visibility."""
+    class Ev:
+        def __init__(self, st): self.new_window_state = st
+    class Win:
+        def __init__(self): self.hidden = False
+        def hide(self): self.hidden = True
+    app = m.TempWatch.__new__(m.TempWatch)
+    w = Win()
+    app._on_state(w, Ev(m.Gdk.WindowState.ICONIFIED))
+    assert w.hidden, "minimize must hide the window"
+    w2 = Win()
+    app._on_state(w2, Ev(m.Gdk.WindowState.FOCUSED))
+    assert not w2.hidden, "focus must not hide"
+    print("test_on_state_minimize ok")
+
+
 if __name__ == "__main__":
     test_color_for()
     test_discover()
     test_vitals_keys()
     test_single_slot()
     test_activate_builds_ui()
+    test_on_state_minimize()
     print("ALL TESTS PASSED")
