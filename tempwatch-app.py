@@ -19,7 +19,8 @@ from typing import Any
 import gi  # type: ignore[import-not-found]  # isort:skip
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gio, Gtk  # type: ignore[import-not-found]  # isort:skip  # noqa: E402
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GLib, Gio, Gtk  # type: ignore[import-not-found]  # isort:skip  # noqa: E402
 
 HWMON = "/sys/class/hwmon"
 APP_ID = "dev.leo.tempwatch"
@@ -368,6 +369,9 @@ class TempWatch(Gtk.Application):
         with contextlib.suppress(Exception):
             win.set_icon_from_file(ICON)
         win.set_role("tempwatch-main")
+        # stay out of the dash/dock: only the tray (top-bar) icon represents
+        # the app; a utility window is not tracked as an app window
+        win.set_type_hint(Gdk.WindowTypeHint.UTILITY)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         win.add(box)
