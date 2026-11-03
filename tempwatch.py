@@ -18,13 +18,19 @@ HWMON = "/sys/class/hwmon"
 # pretty section names per hwmon driver (display groups: CPU / DRAM / TSENSOR1 / GPU)
 NAMES = {
     "k10temp": "CPU",
+    "coretemp": "CPU",
     "spd5118": "DRAM",
     "amdgpu": "GPU",
+    "nvidia": "GPU",
     "nct6799": "Board",
+    "asus": "Board (ASUS WMI)",
+    "nvme": "NVMe",
 }
 # order sections
-ORDER = ["k10temp", "spd5118", "tsensor", "nct6799", "amdgpu"]
-WANT = {"k10temp", "spd5118", "amdgpu", "nct6799"}
+ORDER = ["k10temp", "coretemp", "spd5118", "tsensor", "nct6799", "asus",
+         "amdgpu", "nvidia", "nvme"]
+WANT = {"k10temp", "coretemp", "spd5118", "amdgpu", "nvidia", "nct6799",
+        "asus", "nvme"}
 # amdgpu exposes junk labels; keep the meaningful temps only
 GPU_LABELS = {"edge", "junction", "mem"}
 # NCT6799 board thermistors (TSENSOR header shows as one of the AUXTINs)
@@ -150,6 +156,9 @@ def render(sensors, stats, hist, t0):
             f"  {name:<32}{FG[col]}{cur:>6.1f}°{RESET}"
             f"{DIM}{st[0]:>6.1f}°{st[1]:>6.1f}°{RESET}{DIM}{lim:>6}{RESET}  {bar(cur, hi, crit)}"
         )
+    if not sensors:
+        lines.append("  no supported sensors found — see README (hwmon drivers)")
+        return "\n".join(lines)
     # sparkline of hottest sensor over time
     hot = max(sensors, key=lambda r: r[3])
     ident = f"{hot[0]}|{hot[1]}|{hot[2]}"

@@ -30,7 +30,11 @@ jobs:
           ast.parse(open("/usr/share/tempwatch/tempwatch-app.py").read())
           EOF
           command -v tempwatch tempwatch-tui
+          test -x /usr/bin/tempwatch /usr/bin/tempwatch-tui
           dpkg -l tempwatch | tail -1
+
+      - name: Checksums
+        run: (cd dist && sha256sum * > SHA256SUMS.txt)
 
       - uses: softprops/action-gh-release@v2   # zizmor: ignore[unpinned-uses]
         with:

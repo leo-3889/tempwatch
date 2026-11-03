@@ -15,18 +15,29 @@ ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
 echo "==> Checking dependencies"
 command -v python3 >/dev/null || { echo "python3 missing"; exit 1; }
 if ! python3 -c "import gi; gi.require_version('Gtk','3.0'); from gi.repository import Gtk" 2>/dev/null; then
-    echo "    installing gir1.2-gtk-3.0 (needs sudo)"
-    sudo apt-get update -qq && sudo apt-get install -y -qq gir1.2-gtk-3.0
+    if command -v sudo >/dev/null; then
+        echo "    installing gir1.2-gtk-3.0 (needs sudo)"
+        sudo apt-get update -qq && sudo apt-get install -y -qq gir1.2-gtk-3.0
+    else
+        echo "    ERROR: python3-gi missing and no sudo available"
+        exit 1
+    fi
 fi
 
 echo "==> Ensuring sensor modules load at boot"
-for m in spd5118 nct6775; do
-    echo "$m" | sudo tee "/etc/modules-load.d/$m.conf" >/dev/null
-    sudo modprobe "$m" 2>/dev/null || echo "    note: $m not loadable now (ok if hardware absent)"
-done
-SENSORS_OUT="$(sensors 2>/dev/null || true)"
-echo "$SENSORS_OUT" | grep -qi "nct6799\|spd5118" \
-    || echo "    warning: no board/dram sensors visible yet — check 'sensors'"
+if command -v sudo >/dev/null; then
+    for m in spd5118 nct6775; do
+        echo "$m" | sudo tee "/etc/modules-load.d/$m.conf" >/dev/null
+        sudo modprobe "$m" 2>/dev/null || echo "    note: $m not loadable now (ok if hardware absent)"
+    done
+else
+    echo "    no sudo: skipping boot module setup (app still reads existing sensors)"
+fi
+if command -v sensors >/dev/null; then
+    SENSORS_OUT="$(sensors 2>/dev/null || true)"
+    echo "$SENSORS_OUT" | grep -qi "nct6799\|spd5118\|nvme\|coretemp" \
+        || echo "    warning: no supported sensors visible yet — check 'sensors'"
+fi
 
 echo "==> Installing app files"
 mkdir -p "$SRC" "$BIN" "$APPS" "$ICONS"
@@ -40,8 +51,8 @@ cat > "$APPS/dev.leo.tempwatch.desktop" <<EOF
 Type=Application
 Name=TempWatch
 Comment=Live hardware temperature monitor
-Exec=$SRC/tempwatch-app.py
-Icon=$SRC/tempwatch-icon.svg
+Exec="$SRC/tempwatch-app.py"
+Icon="$SRC/tempwatch-icon.svg"
 Terminal=false
 Categories=System;Monitor;
 StartupWMClass=dev.leo.tempwatch

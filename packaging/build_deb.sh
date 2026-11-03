@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 VER="${1:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo 0.0.0)}"
 NAME="tempwatch_${VER}_all"
 ROOT="dist/$NAME"
-rm -rf "$ROOT" "$NAME.deb"
+rm -rf "$ROOT"
 mkdir -p "$ROOT/DEBIAN" "$ROOT/usr/bin" "$ROOT/usr/share/tempwatch" \
          "$ROOT/usr/share/applications" "$ROOT/usr/share/icons/hicolor/scalable/apps"
 
@@ -16,11 +16,11 @@ install -m 0755 tempwatch.py     "$ROOT/usr/share/tempwatch/tempwatch.py"
 install -m 0644 tempwatch-icon.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/dev.leo.tempwatch.svg"
 cp tempwatch-icon.svg "$ROOT/usr/share/tempwatch/tempwatch-icon.svg"
 
-cat > "$ROOT/usr/bin/tempwatch" <<'EOF'
+install -m 0755 /dev/stdin "$ROOT/usr/bin/tempwatch" <<'EOF'
 #!/bin/sh
 exec python3 /usr/share/tempwatch/tempwatch-app.py "$@"
 EOF
-cat > "$ROOT/usr/bin/tempwatch-tui" <<'EOF'
+install -m 0755 /dev/stdin "$ROOT/usr/bin/tempwatch-tui" <<'EOF'
 #!/bin/sh
 exec python3 /usr/share/tempwatch/tempwatch.py "$@"
 EOF
@@ -45,10 +45,11 @@ Priority: optional
 Architecture: all
 Depends: python3, python3-gi, gir1.2-gtk-3.0
 Maintainer: leo-3889
+Homepage: https://github.com/leo-3889/tempwatch
 Description: HWiNFO-style live hardware temperature monitor
- GTK3 sensor dashboard reading /sys/class/hwmon: CPU (k10temp), DDR5 DIMMs
- (spd5118), motherboard + TSENSOR headers (nct6775), AMD GPUs (amdgpu),
- with per-sensor temperature-over-time graphs.
+ GTK3 sensor dashboard reading /sys/class/hwmon: CPU (k10temp/coretemp),
+ DDR5 DIMMs (spd5118), motherboard + TSENSOR headers (nct6775), AMD and
+ NVIDIA GPUs, NVMe drives; per-sensor temperature-over-time graphs.
 EOF
 
 cat > "$ROOT/DEBIAN/postinst" <<'EOF'
