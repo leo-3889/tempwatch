@@ -9,7 +9,9 @@ GPUs (amdgpu). No dependencies beyond python3-gi (Ubuntu desktop default).
 """
 import contextlib
 import glob
+import json
 import os
+import subprocess
 import time
 from collections import deque
 from typing import Any
@@ -197,6 +199,125 @@ class TempWatch(Gtk.Application):
         self.win: Gtk.ApplicationWindow | None = None
         self.store = Gtk.ListStore(*COLS)
         self.spark = SparkRenderer()
+        self.ind = None  # optional tray/top-bar indicator
+        self.vitals: Gio.Settings | None = None  # Vitals shell extension
+        with contextlib.suppress(Exception):
+            self.vitals = Gio.Settings.new("org.gnome.shell.extensions.vitals")
+
+    # --- top-bar (Vitals extension) pinning -------------------------------
+
+    def _vitals_sensors(self) -> list[dict]:
+        vs = self.vitals
+        if vs is None:
+            return []
+        try:
+            return [dict(x) for x in vs.get_value(
+                "config-custom-sensors-array").unpack()]
+        except Exception:
+            return []
+
+    def _chip_for(self, h: str, key: str) -> str:
+        """Map hwmon dir + temp index -> lm-sensors chip key (Vitals
+        matches on it): same sensor label and ~same live reading."""
+        d = os.path.join(HWMON, h)
+        label = read_str(f"{d}/{key}_label")
+        raw = read_str(f"{d}/{key}_input")
+        try:
+            chips = json.loads(subprocess.run(
+                ["sensors", "-j"], capture_output=True, text=True,
+                timeout=5).stdout)
+        except Exception:
+            return h
+        want = f"{key}_input"
+        for ck, body in chips.items():
+            for sub, ent in body.items():
+                if not isinstance(ent, dict) or want not in ent:
+                    continue
+                if label is not None and sub != label:
+                    continue
+                if raw is not None:
+                    try:
+                        if abs(float(ent[want]) - int(raw) / 1000.0) > 1.0:
+                            continue
+                    except (TypeError, ValueError):
+                        continue
+                return ck
+        return h
+
+    def _pin_vitals(self, row_id: str, name: str, on: bool) -> None:
+        """Add/remove a custom Vitals sensor for one hwmon input so its
+        value shows as text in the GNOME top bar."""
+        driver, h, key = row_id.split("|")
+        vs = self.vitals
+        if vs is None:
+            return
+        arr = self._vitals_sensors()
+        arr = [s for s in arr if s.get("name") != name]
+        if on:
+            chip = self._chip_for(h, key)
+            lab = read_str(f"{HWMON}/{h}/{key}_label") or key
+            arr.append({"name": name, "sensorType": "temp", "command": chip,
+                        "pw1": key, "label": lab, "scale": 1})
+        vs.set_value("config-custom-sensors-array",
+                     GLib.Variant("aa{sv}", arr))
+        groups = [dict(g) for g in vs.get_value(
+            "config-extensions-array").unpack()]
+        groups = [g for g in groups
+                  if not str(g.get("name", "")).startswith("custom")]
+        names = [s["name"] for s in arr]
+        for i in range(len(names)):
+            groups.append({"name": f"custom{i + 1}", "showLabel": True,
+                           "showSeparator": True})
+        vs.set_value("config-extensions-array", GLib.Variant("aa{sv}", groups))
+        vs.set_boolean("show-extensions-position-text", True)
+
+    def _is_pinned(self, name: str) -> bool:
+        return any(s.get("name") == name for s in self._vitals_sensors())
+
+    def _on_row_click(self, view: Gtk.TreeView, event: Any) -> bool:
+        if event.button != 3 or self.vitals is None:
+            return False
+        pos = view.get_path_at_pos(int(event.x), int(event.y))
+        if not pos:
+            return False
+        it = self.store.get_iter(pos[0])
+        row_id, name = self.store.get(it, 0, 1)
+        menu = Gtk.Menu()
+        on = self._is_pinned(name)
+        item = Gtk.MenuItem(label=("Remove from taskbar" if on
+                                   else "Show value in taskbar"))
+        item.connect("activate",
+                     lambda *_: self._pin_vitals(row_id, name, not on))
+        menu.append(item)
+        menu.show_all()
+        menu.popup_at_pointer(event)
+        return True
+
+    def _make_indicator(self) -> None:
+        """Top-bar (AppIndicator) readout of the hottest sensor; no-op on
+        desktops without a tray."""
+        gi.require_version("AyatanaAppIndicator3", "0.1")
+        from gi.repository import AyatanaAppIndicator3 as AI  # type: ignore[import-not-found]
+        self.ind = AI.Indicator.new(APP_ID, "dev.leo.tempwatch",
+                                    AI.IndicatorCategory.APPLICATION_STATUS)
+        self.ind.set_status(AI.IndicatorStatus.ACTIVE)
+        menu = Gtk.Menu()
+        show = Gtk.MenuItem(label="Show TempWatch")
+        show.connect("activate", lambda *_: self.win.present() if self.win else self.activate())
+        menu.append(show)
+        menu.append(Gtk.SeparatorMenuItem())
+        quit_i = Gtk.MenuItem(label="Quit")
+        quit_i.connect("activate", lambda *_: self.quit())
+        menu.append(quit_i)
+        menu.show_all()
+        self.ind.set_menu(menu)
+
+    def _update_indicator(self, rows) -> None:
+        if self.ind is None or not rows:
+            return
+        hot = max(rows, key=lambda r: r[2])
+        self.ind.set_label(f"{hot[2]:.0f}°", f"{hot[1]} · {hot[2]:.1f}°")
+        self.ind.set_title(f"TempWatch — hottest {hot[1]} {hot[2]:.1f}°")
 
     def do_activate(self) -> None:
         win = self.win = Gtk.ApplicationWindow(application=self, title="TempWatch")
@@ -217,6 +338,7 @@ class TempWatch(Gtk.Application):
         box.pack_start(header, False, False, 0)
 
         view = Gtk.TreeView(model=self.store)
+        view.connect("button-press-event", self._on_row_click)
         for i, (title, width, col_i) in enumerate(
                 [("Sensor", 300, 1), ("Now", 70, 2), ("Min", 70, 3),
                  ("Max", 70, 4), ("Limit", 70, 5)]):
@@ -246,6 +368,9 @@ class TempWatch(Gtk.Application):
 
         self.tick()
         GLib.timeout_add_seconds(1, self.tick)
+        with contextlib.suppress(Exception):  # tray-less DEs: window only
+            self._make_indicator()
+            self._update_indicator(discover())
         win.show_all()
 
     def _color_cell(self, _col: Any, cell: Any, model: Any, it: Any,
@@ -282,6 +407,7 @@ class TempWatch(Gtk.Application):
                 self.store.append(vals)
         while len(self.store) > len(rows):
             del self.store[len(self.store) - 1]
+        self._update_indicator(rows)
         for sid in list(self.hist):
             if sid not in seen:
                 del self.hist[sid]
