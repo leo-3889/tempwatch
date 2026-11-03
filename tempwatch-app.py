@@ -10,6 +10,7 @@ GPUs (amdgpu). No dependencies beyond python3-gi (Ubuntu desktop default).
 import contextlib
 import gc
 import glob
+import json
 import os
 import time
 from collections import deque
@@ -201,6 +202,10 @@ class TempWatch(Gtk.Application):
         self.spark = SparkRenderer()
         self.ind = None  # optional tray/top-bar indicator
         self._ind_last: tuple = ()
+        self.pinned: str | None = None
+        with contextlib.suppress(Exception):
+            with open(os.path.expanduser("~/.config/tempwatch-pin.json")) as f:
+                self.pinned = json.load(f).get("row")
         self.vitals = self._open_vitals()
 
     def _open_vitals(self) -> "Gio.Settings | None":
@@ -265,19 +270,19 @@ class TempWatch(Gtk.Application):
         except Exception:
             return []
 
-    def _pin_vitals(self, row_id: str, _name: str, on: bool, rows=None) -> None:
+    def _pin_vitals(self, row_id: str, _name: str, _on: bool,
+                    rows=None) -> None:
+        """Single-slot pin: this sensor replaces any previously pinned one."""
+        rows = rows if rows is not None else discover()
+        key = self._vitals_key(row_id, rows)
+        self.pinned = row_id
+        self._save_pin()
         vs = self.vitals
         if vs is None:
             return
-        key = self._vitals_key(row_id, rows)
-        hot = self._hot_sensors()
-        if on:
-            if key not in hot:
-                hot.append(key)
-            with contextlib.suppress(ValueError):
-                hot.remove("_default_icon_")
-        else:
-            hot = [k for k in hot if k != key]
+        app_keys = {self._vitals_key(sid, rows) for sid, *_x in rows}
+        hot = [k for k in self._hot_sensors() if k not in app_keys]
+        hot.append(key)
         vs.set_strv("hot-sensors", hot)
         # show pins next to the system tray (Vitals default is center,
         # where maximized windows hide them)
@@ -289,9 +294,6 @@ class TempWatch(Gtk.Application):
         vs.set_boolean("show-temperature", not v)
         vs.set_boolean("show-temperature", v)
 
-    def _is_pinned(self, row_id: str, rows=None) -> bool:
-        return self._vitals_key(row_id, rows) in self._hot_sensors()
-
     def _on_row_click(self, view: Gtk.TreeView, event: Any) -> bool:
         if event.button != 3 or self.vitals is None:
             return False
@@ -300,13 +302,10 @@ class TempWatch(Gtk.Application):
             return False
         it = self.store.get_iter(pos[0])
         row_id, name = self.store.get(it, 0, 1)
-        rows = discover()
-        on = self._is_pinned(row_id, rows)
         menu = Gtk.Menu()
-        item = Gtk.MenuItem(label=("Remove from taskbar" if on
-                                   else "Show value in taskbar"))
+        item = Gtk.MenuItem(label="Show value in taskbar")
         item.connect("activate",
-                     lambda *_: self._pin_vitals(row_id, name, not on, rows))
+                     lambda *_: self._pin_vitals(row_id, name, True))
         menu.append(item)
         menu.show_all()
         menu.popup_at_pointer(event)
@@ -324,6 +323,9 @@ class TempWatch(Gtk.Application):
         show = Gtk.MenuItem(label="Show TempWatch")
         show.connect("activate", lambda *_: self.win.present() if self.win else self.activate())
         menu.append(show)
+        reset_i = Gtk.MenuItem(label="Show hottest sensor")
+        reset_i.connect("activate", self._unpin)
+        menu.append(reset_i)
         menu.append(Gtk.SeparatorMenuItem())
         quit_i = Gtk.MenuItem(label="Quit")
         quit_i.connect("activate", lambda *_: self.quit())
@@ -331,10 +333,28 @@ class TempWatch(Gtk.Application):
         menu.show_all()
         self.ind.set_menu(menu)
 
+    def _save_pin(self) -> None:
+        with contextlib.suppress(Exception):
+            os.makedirs(os.path.expanduser("~/.config"), exist_ok=True)
+            with open(os.path.expanduser("~/.config/tempwatch-pin.json"),
+                      "w") as f:
+                json.dump({"row": self.pinned}, f)
+
+    def _unpin(self, *_a) -> None:
+        self.pinned = None
+        self._save_pin()
+        vs = self.vitals
+        if vs is not None:
+            rows = discover()
+            app_keys = {self._vitals_key(sid, rows) for sid, *_x in rows}
+            vs.set_strv("hot-sensors", [k for k in self._hot_sensors()
+                                        if k not in app_keys])
+
     def _update_indicator(self, rows) -> None:
         if self.ind is None or not rows:
             return
-        hot = max(rows, key=lambda r: r[2])
+        hot = (next((r for r in rows if r[0] == self.pinned), None)
+               or max(rows, key=lambda r: r[2]))
         state = (round(hot[2]), hot[1])
         if state == self._ind_last:
             return
