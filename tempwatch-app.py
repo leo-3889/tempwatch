@@ -9,9 +9,7 @@ GPUs (amdgpu). No dependencies beyond python3-gi (Ubuntu desktop default).
 """
 import contextlib
 import glob
-import json
 import os
-import subprocess
 import time
 from collections import deque
 from typing import Any
@@ -201,80 +199,86 @@ class TempWatch(Gtk.Application):
         self.store = Gtk.ListStore(*COLS)
         self.spark = SparkRenderer()
         self.ind = None  # optional tray/top-bar indicator
-        self.vitals: Gio.Settings | None = None  # Vitals shell extension
-        src = Gio.SettingsSchemaSource.get_default()
-        if src is not None and src.lookup(VITALS_SCHEMA, True) is not None:
-            self.vitals = Gio.Settings.new(VITALS_SCHEMA)
+        self.vitals = self._open_vitals()
+
+    def _open_vitals(self) -> "Gio.Settings | None":
+        """Vitals' gsettings schema ships inside the extension directory;
+        load it from there so the right-click pinning works from a normal
+        app process."""
+        base = os.path.expanduser
+        dirs = [base("~/.local/share/gnome-shell/extensions/Vitals@CoreCoding.com/schemas"),
+                "/usr/share/gnome-shell/extensions/Vitals@CoreCoding.com/schemas"]
+        for d in dirs:
+            if os.path.exists(os.path.join(d, "gschemas.compiled")):
+                src = Gio.SettingsSchemaSource.new_from_directory(
+                    d, Gio.SettingsSchemaSource.get_default(), False)
+                schema = src.lookup(VITALS_SCHEMA, True)
+                if schema is not None:
+                    return Gio.Settings.new_full(schema, None)
+        return None
 
     # --- top-bar (Vitals extension) pinning -------------------------------
 
-    def _vitals_sensors(self) -> list[dict]:
+    def _vitals_key(self, row_id: str) -> str:
+        """Key Vitals v86 shows (and stores in hot-sensors) for one row:
+        '<chipname> <label>' with its own dedup suffixes."""
+        driver, h, key = row_id.split("|")
+        d = os.path.join(HWMON, h)
+        chip = read_str(os.path.join(d, "name")) or driver
+        label = read_str(f"{d}/{key}_label")
+        if label is None:
+            label = key
+        base = f"{chip} {label}" if chip != label else label
+        base = base.replace("Package id", "CPU")
+        # dedup across rows in the same enumeration order Vitals uses
+        counts: dict[str, int] = {}
+        for sid, _n, _c, _hi, _cr in discover():
+            k = self._vitals_key_base(sid)
+            counts[k] = counts.get(k, 0) + 1
+            if sid == row_id:
+                return k if counts[k] == 1 else f"{k} {counts[k]}"
+        return base
+
+    def _vitals_key_base(self, row_id: str) -> str:
+        driver, h, key = row_id.split("|")
+        d = os.path.join(HWMON, h)
+        chip = read_str(os.path.join(d, "name")) or driver
+        label = read_str(f"{d}/{key}_label")
+        if driver == "nvme":
+            model = read_str(f"{d}/device/model")
+            if model:
+                return f"{chip} {model.strip()} {key}"
+        if label is None:
+            label = key
+        base = f"{chip} {label}" if chip != label else label
+        return base.replace("Package id", "CPU")
+
+    def _hot_sensors(self) -> list[str]:
         vs = self.vitals
         if vs is None:
             return []
         try:
-            return [dict(x) for x in vs.get_value(
-                "config-custom-sensors-array").unpack()]
+            return list(vs.get_strv("hot-sensors"))
         except Exception:
             return []
 
-    def _chip_for(self, h: str, key: str) -> str:
-        """Map hwmon dir + temp index -> lm-sensors chip key (Vitals
-        matches on it): same sensor label and ~same live reading."""
-        d = os.path.join(HWMON, h)
-        label = read_str(f"{d}/{key}_label")
-        raw = read_str(f"{d}/{key}_input")
-        try:
-            chips = json.loads(subprocess.run(
-                ["sensors", "-j"], capture_output=True, text=True,
-                timeout=5).stdout)
-        except Exception:
-            return h
-        want = f"{key}_input"
-        for ck, body in chips.items():
-            for sub, ent in body.items():
-                if not isinstance(ent, dict) or want not in ent:
-                    continue
-                if label is not None and sub != label:
-                    continue
-                if raw is not None:
-                    try:
-                        if abs(float(ent[want]) - int(raw) / 1000.0) > 1.0:
-                            continue
-                    except (TypeError, ValueError):
-                        continue
-                return ck
-        return h
-
-    def _pin_vitals(self, row_id: str, name: str, on: bool) -> None:
-        """Add/remove a custom Vitals sensor for one hwmon input so its
-        value shows as text in the GNOME top bar."""
-        driver, h, key = row_id.split("|")
+    def _pin_vitals(self, row_id: str, _name: str, on: bool) -> None:
         vs = self.vitals
         if vs is None:
             return
-        arr = self._vitals_sensors()
-        arr = [s for s in arr if s.get("name") != name]
+        key = self._vitals_key(row_id)
+        hot = self._hot_sensors()
         if on:
-            chip = self._chip_for(h, key)
-            lab = read_str(f"{HWMON}/{h}/{key}_label") or key
-            arr.append({"name": name, "sensorType": "temp", "command": chip,
-                        "pw1": key, "label": lab, "scale": 1})
-        vs.set_value("config-custom-sensors-array",
-                     GLib.Variant("aa{sv}", arr))
-        groups = [dict(g) for g in vs.get_value(
-            "config-extensions-array").unpack()]
-        groups = [g for g in groups
-                  if not str(g.get("name", "")).startswith("custom")]
-        names = [s["name"] for s in arr]
-        for i in range(len(names)):
-            groups.append({"name": f"custom{i + 1}", "showLabel": True,
-                           "showSeparator": True})
-        vs.set_value("config-extensions-array", GLib.Variant("aa{sv}", groups))
-        vs.set_boolean("show-extensions-position-text", True)
+            if key not in hot:
+                hot.append(key)
+            with contextlib.suppress(ValueError):
+                hot.remove("_default_icon_")
+        else:
+            hot = [k for k in hot if k != key]
+        vs.set_strv("hot-sensors", hot)
 
-    def _is_pinned(self, name: str) -> bool:
-        return any(s.get("name") == name for s in self._vitals_sensors())
+    def _is_pinned(self, row_id: str) -> bool:
+        return self._vitals_key(row_id) in self._hot_sensors()
 
     def _on_row_click(self, view: Gtk.TreeView, event: Any) -> bool:
         if event.button != 3 or self.vitals is None:
@@ -285,7 +289,7 @@ class TempWatch(Gtk.Application):
         it = self.store.get_iter(pos[0])
         row_id, name = self.store.get(it, 0, 1)
         menu = Gtk.Menu()
-        on = self._is_pinned(name)
+        on = self._is_pinned(row_id)
         item = Gtk.MenuItem(label=("Remove from taskbar" if on
                                    else "Show value in taskbar"))
         item.connect("activate",
