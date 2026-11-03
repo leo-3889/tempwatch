@@ -3,7 +3,6 @@
 HWiNFO-style live hardware temperature monitor for Linux — GTK3, Python,
 zero dependencies beyond `python3-gi` (standard on Ubuntu/GNOME desktops).
 
-![sensor table with live sparkline trends](docs/screenshot.png)
 
 ## What it shows
 

@@ -35,7 +35,7 @@ CPU_NAMES = {"Tctl": "CPU Package (Tctl)", "Tccd1": "CPU CCD 1 (Tccd1)",
 CORETEMP_NAMES = {"Package id 0": "CPU Package", "Package": "CPU Package"}
 BOARD_NAMES = {"SYSTIN": "Motherboard (SYSTIN)", "CPUTIN": "CPU Socket (CPUTIN)",
                "AUXTIN0": "Board Sensor (AUXTIN0)",
-               "AUXTIN3": "TSENSOR1 Custom Probe",   # user-confirmed header
+               "AUXTIN3": "TSENSOR1 Custom Probe",   # TSENSOR1 maps to AUXTIN3 on NCT6799
                "AUXTIN4": "Board Sensor (AUXTIN4)"}
 GPU_KEEP = {"edge": "Core", "junction": "Hotspot", "mem": "Memory (GDDR)"}
 NVIDIA_KEEP = {"GPU Core Temp": "Core", "GPU Memory Temp": "Memory",
