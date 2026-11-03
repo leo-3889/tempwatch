@@ -8,6 +8,7 @@ Sensors: CPU (k10temp), DRAM sticks (spd5118), Board incl. TSENSOR1 (nct6799),
 GPUs (amdgpu). No dependencies beyond python3-gi (Ubuntu desktop default).
 """
 import contextlib
+import gc
 import glob
 import os
 import time
@@ -199,6 +200,7 @@ class TempWatch(Gtk.Application):
         self.store = Gtk.ListStore(*COLS)
         self.spark = SparkRenderer()
         self.ind = None  # optional tray/top-bar indicator
+        self._ind_last: tuple = ()
         self.vitals = self._open_vitals()
 
     def _open_vitals(self) -> "Gio.Settings | None":
@@ -219,7 +221,7 @@ class TempWatch(Gtk.Application):
 
     # --- top-bar (Vitals extension) pinning -------------------------------
 
-    def _vitals_key(self, row_id: str) -> str:
+    def _vitals_key(self, row_id: str, rows=None) -> str:
         """Key Vitals v86 shows (and stores in hot-sensors) for one row:
         '<chipname> <label>' with its own dedup suffixes."""
         driver, h, key = row_id.split("|")
@@ -232,7 +234,8 @@ class TempWatch(Gtk.Application):
         base = base.replace("Package id", "CPU")
         # dedup across rows in the same enumeration order Vitals uses
         counts: dict[str, int] = {}
-        for sid, _n, _c, _hi, _cr in discover():
+        for sid, _n, _c, _hi, _cr in (rows if rows is not None
+                                      else discover()):
             k = self._vitals_key_base(sid)
             counts[k] = counts.get(k, 0) + 1
             if sid == row_id:
@@ -262,11 +265,11 @@ class TempWatch(Gtk.Application):
         except Exception:
             return []
 
-    def _pin_vitals(self, row_id: str, _name: str, on: bool) -> None:
+    def _pin_vitals(self, row_id: str, _name: str, on: bool, rows=None) -> None:
         vs = self.vitals
         if vs is None:
             return
-        key = self._vitals_key(row_id)
+        key = self._vitals_key(row_id, rows)
         hot = self._hot_sensors()
         if on:
             if key not in hot:
@@ -276,9 +279,14 @@ class TempWatch(Gtk.Application):
         else:
             hot = [k for k in hot if k != key]
         vs.set_strv("hot-sensors", hot)
+        # v86 has no changed::hot-sensors handler — nudge a watched key so
+        # the extension repaints the panel (_showHideSensorsChanged redraws)
+        v = vs.get_boolean("show-temperature")
+        vs.set_boolean("show-temperature", not v)
+        vs.set_boolean("show-temperature", v)
 
-    def _is_pinned(self, row_id: str) -> bool:
-        return self._vitals_key(row_id) in self._hot_sensors()
+    def _is_pinned(self, row_id: str, rows=None) -> bool:
+        return self._vitals_key(row_id, rows) in self._hot_sensors()
 
     def _on_row_click(self, view: Gtk.TreeView, event: Any) -> bool:
         if event.button != 3 or self.vitals is None:
@@ -288,12 +296,13 @@ class TempWatch(Gtk.Application):
             return False
         it = self.store.get_iter(pos[0])
         row_id, name = self.store.get(it, 0, 1)
+        rows = discover()
+        on = self._is_pinned(row_id, rows)
         menu = Gtk.Menu()
-        on = self._is_pinned(row_id)
         item = Gtk.MenuItem(label=("Remove from taskbar" if on
                                    else "Show value in taskbar"))
         item.connect("activate",
-                     lambda *_: self._pin_vitals(row_id, name, not on))
+                     lambda *_: self._pin_vitals(row_id, name, not on, rows))
         menu.append(item)
         menu.show_all()
         menu.popup_at_pointer(event)
@@ -322,6 +331,10 @@ class TempWatch(Gtk.Application):
         if self.ind is None or not rows:
             return
         hot = max(rows, key=lambda r: r[2])
+        state = (round(hot[2]), hot[1])
+        if state == self._ind_last:
+            return
+        self._ind_last = state
         self.ind.set_label(f"{hot[2]:.0f}°", f"{hot[1]} · {hot[2]:.1f}°")
         self.ind.set_title(f"TempWatch — hottest {hot[1]} {hot[2]:.1f}°")
 
@@ -374,6 +387,9 @@ class TempWatch(Gtk.Application):
 
         self.tick()
         GLib.timeout_add_seconds(1, self.tick)
+        gc.collect()
+        gc.freeze()               # steady-state: only scan per-tick garbage
+        gc.set_threshold(25000, 25, 25)
         with contextlib.suppress(Exception):  # tray-less DEs: window only
             self._make_indicator()
             self._update_indicator(discover())
