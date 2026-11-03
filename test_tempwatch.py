@@ -134,8 +134,14 @@ def test_minimize_button_wired():
                if isinstance(n, _ast.FunctionDef) and n.name == "do_activate")
     code = _ast.unparse(act)
     assert "set_titlebar" in code, "custom titlebar (CSD) required"
-    assert 'connect("clicked", lambda *_a: win.hide())' in code, \
-        "minimize button must hide the window"
+    hits = [n for n in _ast.walk(act)
+            if isinstance(n, _ast.Call)
+            and _ast.unparse(n.func).endswith("connect")
+            and len(n.args) >= 2
+            and isinstance(n.args[0], _ast.Constant)
+            and n.args[0].value == "clicked"
+            and "win.hide()" in _ast.unparse(n)]
+    assert hits, "minimize button must connect clicked -> win.hide()"
     print("test_minimize_button_wired ok")
 
 
