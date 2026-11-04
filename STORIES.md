@@ -1,6 +1,6 @@
 # ⚡ TempWatch — Product Backlog (User Stories)
 
-Source of truth: `tempwatch-app.py` (GTK app, 526 lines), `tempwatch.py` (TUI, 215 lines),
+Source of truth: `tempwatch-app.py` (GTK app, 513 lines), `tempwatch.py` (TUI, 215 lines),
 `test_tempwatch.py` (14 tests, all passing: 13 test functions + module load of
 `tempwatch-app.py` via importlib asserted at import), `install.sh`,
 `uninstall.sh`, `packaging/build_deb.sh`, `.github/workflows/release.yml`, `README.md`.
@@ -18,7 +18,7 @@ Status tags: `[implemented@file:line]` per story; no citation = `[guess]`.
 
 As a **Ryzen/ASUS desktop user** I want a table of every temperature sensor with a plain-language name, live color-coded value, session min/max, firmware limit, and a 3-minute sparkline so that I can spot a overheating component without reading raw `temp1_input` labels.
 
-Implemented: `discover()` tempwatch-app.py:103-147, `color_for()` :155-159, `SparkRenderer` :163-189, columns :440-450, `tick()` :495-522.
+Implemented: `discover()` tempwatch-app.py:103-147, `color_for()` :155-159, `SparkRenderer` :163-189, columns :427-437, `tick()` :482-509.
 
 Acceptance Criteria:
 1. REQ-S1-01. The window (760×500 default, title "TempWatch", role `tempwatch-main`) contains a TreeView with exactly the columns Sensor, Now, Min, Max, Limit, and "Temperature over time (last 3 min)" (expanded, min 140px). — TODO: test `test_table_columns_built` (ast/structural assert on the `("Sensor",…),("Now",…),…` tuple + spark column title in `do_activate`)
@@ -74,15 +74,15 @@ Tests: `test_vitals_keys` + `test_vitals_keys_nvme_and_dedup` (AC2, AC3). AC4-6 
 
 As a **returning user** I want my pinned sensor to survive app restarts, and app-owned keys to be swept on unpin, so that the top bar never accumulates stale TempWatch sensors and never shows more than one.
 
-Implemented: load tempwatch-app.py:206-209, `_save_pin` :353-360, `_unpin` :367-375, sweep in `_pin_vitals` :286-288.
+Implemented: load tempwatch-app.py:206-209, `_save_pin` :340-347, sweep in `_pin_vitals` :286-288.
 
 Acceptance Criteria:
 1. REQ-S4-01. Pinning writes `{"row": "<driver>|<hwmon>|<tempN>"}` to `~/.config/tempwatch-pin.json` (mkdir -p `~/.config`); a missing/unreadable/corrupt file is suppressed and leaves `pinned=None` (app must not crash on a garbage file). — TODO: test `test_pin_file_roundtrip_and_corruption`
 2. REQ-S4-02. On startup the pinned row is restored from that file and drives the indicator label priority (REQ-S2-03). — TODO: test `test_startup_restores_pinned_row`
-3. REQ-S4-03. "Show hottest sensor" (unpin) sets `pinned=None`, persists it, and rewrites `hot-sensors` = current keys minus the app's full key-set (all drivers TempWatch enumerates today), keeping foreign keys. — TODO: test `test_unpin_writes_hot_sensors` (call `app._unpin` with the stub settings object from S3-04; assert swept strv written and `pinned=None` persisted). `test_single_slot` does NOT count — hand-replicated arithmetic, never calls `_unpin`.
+3. REQ-S4-03. [removed@f9f90bd] — the "Show hottest sensor" unpin affordance and `_unpin` were deleted; only the pin-write and app-key sweep survive in `_pin_vitals` :286-288.
 4. REQ-S4-04. At any moment `hot-sensors` contains ≤1 key from the app's key-set (single slot — a second pin replaces the first; sweep-before-append guarantees it even if a stale key from a previous session lingers). — TODO: test `test_pin_vitals_sweeps_app_keys` (shared with REQ-S3-04: pin A then pin B via `app._pin_vitals`, assert stub `set_strv` payload has ≤1 app key)
 
-Tests: none valid — `test_single_slot` computes its own `hot = [k for k in hot if k not in app_keys] + [new]` list in-test and never invokes `_pin_vitals`/`_unpin`; it proves the *idea*, not the code.
+Tests: none valid — `test_single_slot` computes its own `hot = [k for k in hot if k not in app_keys] + [new]` list in-test and never invokes `_pin_vitals`; it proves the *idea*, not the code.
 
 ---
 
@@ -90,7 +90,7 @@ Tests: none valid — `test_single_slot` computes its own `hot = [k for k in hot
 
 As a **user who wants the monitor out of the way** I want the minimize button to hide the window completely (no minimized-window ghost, no taskbar entry) while the app keeps sampling in the tray, so that the top-bar readout stays live.
 
-Implemented: `_on_state` tempwatch-app.py:475-481, custom titlebar with − button wired `clicked → win.hide()` :405-413 (`set_titlebar` :413), `set_skip_taskbar_hint`/`set_skip_pager_hint` :420-421, per-second `tick` continues on hidden window :495.
+Implemented: `_on_state` tempwatch-app.py:462-468, custom titlebar with − button wired `clicked → win.hide()` :392-400 (`set_titlebar` :413), `set_skip_taskbar_hint`/`set_skip_pager_hint` :420-421, per-second `tick` continues on hidden window :495.
 
 Acceptance Criteria:
 1. REQ-S5-01. On the `window-state-event` ICONIFIED transition the handler calls `win.hide()` and returns `False` (no minimized state lingers); FOCUSED/other states leave visibility untouched. — ✅ test_on_state_minimize
@@ -106,7 +106,7 @@ Tests: `test_on_state_minimize` (AC1, calls `app._on_state`), `test_minimize_but
 
 As a **user finishing a session** I want the window's close button to fully quit the app so that no invisible poller and no tray icon remain.
 
-Implemented: `delete-event` tempwatch-app.py:425 — `lambda *_a: (self.quit(), False)[1]`; `do_shutdown` indicator NEVER :362-365.
+Implemented: `delete-event` tempwatch-app.py:412 — `lambda *_a: (self.quit(), False)[1]`; `do_shutdown` indicator NEVER :362-365.
 
 Acceptance Criteria:
 1. REQ-S6-01. Clicking the (X) (delete-event) invokes `self.quit()` and the handler returns `False` (GTK proceeds with destruction); app `do_shutdown` runs, indicator set NEVER. — TODO: test `test_delete_event_quits` (invoke the connected lambda on a stub with `quit()`, assert called and return `False`)
@@ -131,15 +131,15 @@ Tests: none — both new tests listed.
 
 ---
 
-## S8 — Tray menu: Show TempWatch / Show hottest sensor / Quit
+## S8 — Tray menu: Show TempWatch / Quit
 
 As a **tray user** I want a three-item menu on the indicator so that I can reach the window, clear the pin, or exit without any other UI.
 
 Implemented: `_make_indicator` menu tempwatch-app.py:323-336.
 
 Acceptance Criteria:
-1. REQ-S8-01. Indicator menu is exactly: "Show TempWatch" → `_show_window`, "Show hottest sensor" → `_unpin`, separator, "Quit" → `self.quit()`. — TODO: test `test_indicator_menu_labels` (construct menu against a stubbed indicator, assert item labels + handlers)
-2. REQ-S8-02. "Show hottest sensor" unpins per REQ-S4-03 (file written `{"row": null}`, app keys swept from `hot-sensors`). — TODO: test `test_unpin_writes_hot_sensors` (shared with S4-03)
+1. REQ-S8-01. Indicator menu is exactly: "Show TempWatch" → `_show_window`, separator, "Quit" → `self.quit()` (`tempwatch-app.py:325-331`). — TODO: test `test_indicator_menu_labels` (construct menu against a stubbed indicator, assert item labels == ["Show TempWatch", "Quit"] + handlers)
+2. REQ-S8-02. [removed@f9f90bd] — unpin menu entry deleted with `_unpin`.
 3. REQ-S8-03. "Quit" terminates the process (`pgrep` → 0) and removes the indicator. — MANUAL
 
 Tests: none — AC1/2 need new tests.
@@ -269,4 +269,4 @@ Tests: none — docs-drift tests proposed.
 
 ---
 
-*Tally: 13 stories, 64 acceptance criteria — 12 ✅ (ACs proven by tests that call app code), 34 TODO (test proposed), 18 MANUAL (GNOME desktop check). ✅ list: S1-02, S1-03, S1-05, S3-02, S3-03, S5-01, S5-04, S9-01, S9-02, S9-03, S9-05, S9-06 (S3-02/S3-03 each cite two tests). Demoted to TODO: S3-04, S4-03, S4-04 — `test_single_slot` hand-replicates list arithmetic in-test and never calls `_pin_vitals`/`_unpin`. Added REQ-S5-04 (custom-titlebar − button, proven by `test_minimize_button_wired`).*
+*Tally: 13 stories, 62 live acceptance criteria — 12 ✅ (ACs proven by tests that call app code), 32 TODO (test proposed), 18 MANUAL (GNOME desktop check); 2 removed@f9f90bd (unpin affordance). ✅ list: S1-02, S1-03, S1-05, S3-02, S3-03, S5-01, S5-04, S9-01, S9-02, S9-03, S9-05, S9-06 (S3-02/S3-03 each cite two tests).*
